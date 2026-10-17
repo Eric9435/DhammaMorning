@@ -8,7 +8,7 @@ from unittest.mock import patch
 
 from browser_schedule import (
     TASK_NAME, normalize_url, registration_script, install_chrome_task,
-    remove_chrome_task, open_chrome_now,
+    remove_chrome_task, open_chrome_now, chrome_settings_page, chrome_launch_args,
 )
 
 
@@ -75,6 +75,38 @@ class BrowserScheduleTests(unittest.TestCase):
         ok, message = open_chrome_now("https://example.com")
         self.assertFalse(ok)
         self.assertIn("not found", message)
+
+    def test_experimental_autoplay_is_explicit_and_isolated(self):
+        normal = registration_script(Path(r"C:\\Chrome\\chrome.exe"),
+                                     "https://example.org/sermon", 6, 0)
+        self.assertNotIn("--autoplay-policy=", normal)
+        enabled = registration_script(Path(r"C:\\Chrome\\chrome.exe"),
+                                      "https://example.org/sermon", 6, 0, True)
+        self.assertIn("--autoplay-policy=no-user-gesture-required", enabled)
+        self.assertIn("--user-data-dir=", enabled)
+        self.assertIn("ChromeAudioProfile", enabled)
+        self.assertIn('--new-window "https://example.org/sermon"', enabled)
+
+    def test_chrome_args_never_change_the_normal_profile(self):
+        self.assertEqual(chrome_launch_args("https://example.com"),
+                         ["--new-window", "https://example.com"])
+        separate = chrome_launch_args("https://example.com", True)
+        self.assertTrue(separate[0].startswith("--user-data-dir="))
+        self.assertIn("ChromeAudioProfile", separate[0])
+        self.assertIn("--autoplay-policy=no-user-gesture-required", separate)
+
+    @patch("browser_schedule.find_chrome", return_value=Path(r"C:\\Chrome\\chrome.exe"))
+    @patch("browser_schedule.subprocess.Popen")
+    def test_sound_settings_are_opened_with_opt_in_profile(self, popen, _chrome):
+        ok, _ = chrome_settings_page("sound", True)
+        self.assertTrue(ok)
+        args = popen.call_args.args[0]
+        self.assertIn("chrome://settings/content/sound", args)
+        self.assertIn("--autoplay-policy=no-user-gesture-required", args)
+
+    def test_settings_page_uses_only_known_routes(self):
+        ok, _ = chrome_settings_page("chrome://evil/test")
+        self.assertFalse(ok)
 
     def test_time_validation(self):
         for hour, minute in ((24, 0), (-1, 0), (5, 60)):
