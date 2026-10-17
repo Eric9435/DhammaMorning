@@ -112,6 +112,8 @@ class DhammaWindow(QMainWindow):
         self.timer = QTimer(self)
         self.timer.timeout.connect(self._tick)
         self.timer.start(500)
+        if self.config.get("website_enabled", False) and not self.config.get("chrome_setup_seen", False):
+            QTimer.singleShot(350, self._chrome_setup)
 
     def _create_layout(self) -> None:
         body = QWidget()
@@ -515,6 +517,8 @@ class DhammaWindow(QMainWindow):
         outer.addWidget(step_one)
         sound_button = QPushButton("Open Chrome Sound Settings")
         outer.addWidget(sound_button)
+        site_button = QPushButton("Open Chrome Site Permissions")
+        outer.addWidget(site_button)
 
         step_two = QLabel(
             "2. Open your Dhamma website in Chrome. Use the icon next to the address "
@@ -573,6 +577,11 @@ class DhammaWindow(QMainWindow):
                 QMessageBox.warning(dialog, "Chrome website", message)
 
         sound_button.clicked.connect(do_sound)
+        site_button.clicked.connect(
+            lambda: response.setText(
+                chrome_settings_page("sites", experimental.isChecked())[1]
+            )
+        )
         website_button.clicked.connect(do_website)
 
         controls = QHBoxLayout()
