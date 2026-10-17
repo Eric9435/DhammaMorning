@@ -79,8 +79,14 @@ class PlaybackService : Service() {
 
     private fun startPlayback() {
         tracks = DhammaPreferences.tracks(this)
-        if (tracks.isEmpty()) { stopSelf(); return }
-        try { foreground() } catch (_: Exception) { stopSelf(); return }
+        if (tracks.isEmpty()) {
+            DhammaPreferences.event(this, "Playback failed: no MP3 files")
+            stopSelf(); return
+        }
+        try { foreground() } catch (e: Exception) {
+            DhammaPreferences.event(this, "Playback service blocked: ${e.javaClass.simpleName}: ${e.message}")
+            stopSelf(); return
+        }
         stopMode = DhammaPreferences.stopMode(this)
         val durationMs = DhammaPreferences.durationMinutes(this).toLong() * 60_000L
         deadlineElapsed = if (stopMode == PlaybackStopPolicy.DURATION)
@@ -136,16 +142,19 @@ class PlaybackService : Service() {
                 if (playing && !stopDue()) {
                     failures = 0
                     it.start()
+                    DhammaPreferences.event(this, "AUDIO PLAYING: track ${nextTrack} of ${tracks.size}")
                 } else it.release()
             }
             mp.setOnCompletionListener { handler.post { if (playing) playNext() } }
-            mp.setOnErrorListener { _, _, _ ->
+            mp.setOnErrorListener { _, what, extra ->
+                DhammaPreferences.event(this, "MP3 error: code $what / $extra")
                 failures++
                 handler.post { playNext() }
                 true
             }
             mp.prepareAsync()
-        } catch (_: Exception) {
+        } catch (e: Exception) {
+            DhammaPreferences.event(this, "Audio file cannot open: ${e.javaClass.simpleName}: ${e.message}")
             failures++
             handler.post { playNext() }
         }
