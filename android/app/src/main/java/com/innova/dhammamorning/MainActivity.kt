@@ -80,6 +80,7 @@ private fun DhammaHome() {
     var status by remember { mutableStateOf("Ready for your morning practice") }
     var isPlaying by remember { mutableStateOf(PlaybackService.playing) }
     var exactReady by remember { mutableStateOf(PlaybackScheduler.canScheduleExactly(context)) }
+    var alarmEvent by remember { mutableStateOf(DhammaPreferences.lastEvent(context)) }
 
     val pickAudio = rememberLauncherForActivityResult(
         ActivityResultContracts.OpenMultipleDocuments()
@@ -139,6 +140,7 @@ private fun DhammaHome() {
         while (true) {
             delay(1000)
             isPlaying = PlaybackService.playing
+            alarmEvent = DhammaPreferences.lastEvent(context)
             val allowed = PlaybackScheduler.canScheduleExactly(context)
             if (allowed != exactReady) {
                 exactReady = allowed
@@ -246,11 +248,35 @@ private fun DhammaHome() {
                         Text(
                             if (next != null) "Next: " + DateFormat.getDateTimeInstance(
                                 DateFormat.MEDIUM, DateFormat.SHORT).format(Date(next))
-                            else if (scheduled) "Exact alarm access required"
+                            else if (scheduled) "Exact alarm permission REQUIRED"
                             else "Schedule is off",
                             style = MaterialTheme.typography.bodySmall,
                             color = if (next != null) Sea else Color.Gray
                         )
+                        Spacer(Modifier.height(8.dp))
+                        if (!exactReady) {
+                            Button(onClick = {
+                                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+                                    runCatching {
+                                        context.startActivity(Intent(Settings.ACTION_REQUEST_SCHEDULE_EXACT_ALARM).apply {
+                                            data = Uri.parse("package:${context.packageName}")
+                                        })
+                                    }.onFailure { status = "Open Settings > Alarms & reminders manually." }
+                                }
+                            }) { Text("Grant Alarms & reminders") }
+                        }
+                        OutlinedButton(
+                            enabled = tracks.isNotEmpty() && exactReady,
+                            onClick = {
+                                val ok = PlaybackScheduler.testIn90Seconds(context)
+                                status = if (ok) "Test scheduled for 90 seconds. Lock your phone; audio should start automatically."
+                                    else "Test failed. Check alarm status below."
+                            }
+                        ) { Text("TEST AUTO PLAY (90 SEC)") }
+                        Text("Last alarm status: $alarmEvent",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = if (alarmEvent.contains("FAILED") || alarmEvent.contains("NOT ARMED"))
+                                MaterialTheme.colorScheme.error else Sea)
                     }
                 }
             }
