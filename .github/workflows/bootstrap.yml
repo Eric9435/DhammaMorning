@@ -1,0 +1,53 @@
+name: Bootstrap Dhamma Morning source
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'transfer/source.b64'
+      - '.github/workflows/bootstrap.yml'
+  workflow_dispatch:
+permissions:
+  contents: write
+jobs:
+  import:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: true
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Import checksum-verified source bundle
+        shell: bash
+        run: |
+          python -m pip install --disable-pip-version-check brotli
+          python - <<'PY'
+          import base64, hashlib, io, pathlib, tarfile, brotli
+          root = pathlib.Path.cwd()
+          data = base64.b64decode((root / 'transfer/source.b64').read_text().strip(),validate=False)
+          actual = hashlib.sha256(data).hexdigest()
+          expected = 'fbb80f14fb7deb538934f19ba73e39a9377f7d41afcde1a737b40821ff0f21bb'
+          assert actual == expected, 'Source archive SHA256 mismatch: ' + actual
+          with tarfile.open(fileobj=io.BytesIO(brotli.decompress(data)), mode='r:') as tar:
+              members = tar.getmembers()
+              assert len(members) >= 15, f'Only {len(members)} files found'
+              for item in members:
+                  path = pathlib.PurePosixPath(item.name)
+                  assert path.parts and '..' not in path.parts and not path.is_absolute(), item.name
+                  assert item.isfile(), item.name
+              tar.extractall(path=root,filter='data')
+          print('Verified and imported', len(members), 'files')
+          PY
+          rm -rf transfer
+          rm -f .github/workflows/bootstrap.yml
+      - name: Commit source into dedicated repository
+        shell: bash
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A
+          git diff --cached --quiet && exit 0
+          git commit -m "Import verified Dhamma Morning v0.2.0 Android and Windows source"
+          git push origin HEAD:main
