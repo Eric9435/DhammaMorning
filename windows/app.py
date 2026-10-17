@@ -12,7 +12,7 @@ from browser_schedule import (install_chrome_task, remove_chrome_task, open_chro
 from pathlib import Path
 
 from PySide6.QtCore import QUrl, Qt, QTimer
-from PySide6.QtGui import QAction
+from PySide6.QtGui import QAction, QPalette, QColor
 from PySide6.QtMultimedia import QAudioOutput, QMediaPlayer
 from PySide6.QtWidgets import (
     QApplication, QComboBox, QFileDialog, QFormLayout, QFrame, QHBoxLayout,
@@ -273,20 +273,59 @@ class DhammaWindow(QMainWindow):
         scroll.setWidget(body)
         self.setCentralWidget(scroll)
         self.setStyleSheet("""
-            QWidget#root { background-color:#F5F7F4; color:#173047; }
+            /* Explicit text color is essential when Windows is in dark mode.
+               System palette text was white on custom light controls previously. */
+            QMainWindow, QWidget#root, QScrollArea {
+                background-color: #F5F7F4; color: #173047;
+            }
+            QScrollArea { border: none; }
+            QLabel, QCheckBox, QRadioButton {
+                color: #173047; background: transparent;
+            }
             QLabel#title { font-size:31px; font-weight:750; color:#173047; }
             QLabel#eyebrow { font-size:11px; font-weight:700; color:#2D8278; }
-            QLabel#sub { color:#6F8190; font-size:13px; }
-            QLabel#hint { color:#5D7280; font-size:12px; }
-            QFrame#card { background:white; border:1px solid #DCE6E4; border-radius:14px; }
-            QFrame#card QLabel, QFrame#card QCheckBox { background:transparent; border:none; }
+            QLabel#sub { color:#526779; font-size:13px; }
+            QLabel#hint { color:#43586A; font-size:12px; }
             QLabel#section { font-size:16px; font-weight:700; color:#173047; }
-            QPushButton { padding:9px 12px; border-radius:8px; background:#EAF0EF;
-                border:1px solid #D7E4E2; font-weight:650; color:#173047; }
-            QPushButton:hover { background:#DCEDE9; }
-            QPushButton#accent { background:#296F67; color:white; border:none; }
-            QTimeEdit, QComboBox, QListWidget { border-radius:8px; border:1px solid #CBDDD9;
-                background:white; padding:6px; }
+            QFrame#card {
+                background-color:#FFFFFF;
+                border:1px solid #DCE6E4; border-radius:14px;
+            }
+            QFrame#card QLabel, QFrame#card QCheckBox {
+                background:transparent; border:none;
+            }
+            QPushButton {
+                padding:9px 12px; border-radius:8px;
+                background-color:#EAF0EF; border:1px solid #D7E4E2;
+                font-weight:650; color:#173047;
+            }
+            QPushButton:hover { background-color:#DCEDE9; color:#173047; }
+            QPushButton:disabled { color:#5E7081; background-color:#F2F4F4; }
+            QPushButton#accent {
+                background-color:#296F67; color:#FFFFFF; border:none;
+            }
+            QPushButton#accent:hover { background-color:#20564F; color:#FFFFFF; }
+            QLineEdit, QTimeEdit, QComboBox, QSpinBox, QListWidget {
+                color:#173047; background-color:#FFFFFF;
+                border:1px solid #B9CCC9; border-radius:8px;
+                padding:6px;
+                selection-color:#FFFFFF; selection-background-color:#296F67;
+            }
+            QLineEdit:disabled, QTimeEdit:disabled,
+            QComboBox:disabled, QSpinBox:disabled {
+                color:#586D7D; background-color:#F0F3F3;
+            }
+            QLineEdit[placeholderText] { placeholder-text-color:#60788B; }
+            QComboBox QAbstractItemView {
+                color:#173047; background-color:#FFFFFF;
+                selection-color:#FFFFFF; selection-background-color:#296F67;
+            }
+            QListWidget::item { color:#173047; }
+            QListWidget::item:selected { color:#FFFFFF; background:#296F67; }
+            QScrollBar:vertical { background:#ECF1F0; width:12px; }
+            QScrollBar::handle:vertical {
+                background:#A5B7B6; border-radius:5px; min-height:28px;
+            }
         """)
 
     def _card(self, title: str) -> QVBoxLayout:
@@ -789,8 +828,29 @@ class DhammaWindow(QMainWindow):
         QTimer.singleShot(0, QApplication.instance().quit)
 
 
+def install_light_palette(app: QApplication) -> None:
+    """Keep text readable regardless of Windows light/dark system appearance."""
+    app.setStyle("Fusion")
+    palette = app.palette()
+    for role, hex_color in (
+        (QPalette.ColorRole.Window, "#F5F7F4"),
+        (QPalette.ColorRole.WindowText, "#173047"),
+        (QPalette.ColorRole.Base, "#FFFFFF"),
+        (QPalette.ColorRole.AlternateBase, "#F3F6F5"),
+        (QPalette.ColorRole.Text, "#173047"),
+        (QPalette.ColorRole.Button, "#EAF0EF"),
+        (QPalette.ColorRole.ButtonText, "#173047"),
+        (QPalette.ColorRole.Highlight, "#296F67"),
+        (QPalette.ColorRole.HighlightedText, "#FFFFFF"),
+        (QPalette.ColorRole.PlaceholderText, "#5E7081"),
+    ):
+        palette.setColor(role, QColor(hex_color))
+    app.setPalette(palette)
+
+
 def main() -> int:
     app = QApplication(sys.argv)
+    install_light_palette(app)
     app.setApplicationName(APP_NAME)
     app.setOrganizationName("innovateX")
     app.setQuitOnLastWindowClosed(False)
