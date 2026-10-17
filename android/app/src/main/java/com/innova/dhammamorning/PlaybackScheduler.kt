@@ -7,6 +7,8 @@ import android.content.Context
 import android.content.Intent
 import android.net.Uri
 import android.os.Build
+import java.text.DateFormat
+import java.util.Date
 import org.json.JSONArray
 import java.util.Calendar
 
@@ -24,6 +26,16 @@ object DhammaPreferences {
         val arr = JSONArray()
         uris.distinct().forEach { arr.put(it.toString()) }
         pref(c).edit().putString("tracks", arr.toString()).apply()
+    }
+
+
+    fun lastEvent(c: Context): String =
+        pref(c).getString("lastEvent", "No scheduled alarm has fired yet.") ?: "No event"
+
+    fun event(c: Context, message: String) {
+        val whenText = DateFormat.getDateTimeInstance(DateFormat.SHORT, DateFormat.MEDIUM)
+            .format(Date())
+        pref(c).edit().putString("lastEvent", "$whenText - $message").apply()
     }
 
     fun enabled(c: Context) = pref(c).getBoolean("enabled", false)
@@ -50,6 +62,7 @@ object DhammaPreferences {
 object PlaybackScheduler {
     const val ACTION_PLAY = "com.innova.dhammamorning.ACTION_PLAY"
     const val ACTION_STOP = "com.innova.dhammamorning.ACTION_STOP"
+    const val ACTION_TEST = "com.innova.dhammamorning.ACTION_TEST_ALARM"
 
     fun canScheduleExactly(c: Context): Boolean {
         val manager = c.getSystemService(AlarmManager::class.java)
@@ -73,33 +86,83 @@ object PlaybackScheduler {
         return cal.timeInMillis
     }
 
+
+    private fun arm(c: Context, whenMillis: Long, intent: PendingIntent): Boolean {
+        if (!canScheduleExactly(c)) {
+            DhammaPreferences.event(c, "NOT ARMED: Alarms & reminders permission missing")
+            return false
+        }
+        val alarm = c.getSystemService(AlarmManager::class.java)
+        val open = PendingIntent.getActivity(
+            c, 911, Intent(c, MainActivity::class.java),
+            PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT
+        )
+        return try {
+            // Visible alarm-clock alarms are prioritized even when the phone is idle.
+            alarm.setAlarmClock(AlarmManager.AlarmClockInfo(whenMillis, open), intent)
+            DhammaPreferences.event(
+                c, "ARMED for " + DateFormat.getDateTimeInstance(DateFormat.SHORT, DateFormat.SHORT)
+                    .format(Date(whenMillis))
+            )
+            true
+        } catch (e: Exception) {
+            DhammaPreferences.event(c, "NOT ARMED: ${e.javaClass.simpleName}: ${e.message}")
+            false
+        }
+    }
+
+    fun testIn90Seconds(c: Context): Boolean {
+        if (DhammaPreferences.tracks(c).isEmpty()) {
+            DhammaPreferences.event(c, "TEST FAILED: No MP3 selected")
+            return false
+        }
+        val alarm = c.getSystemService(AlarmManager::class.java)
+        val intent = PendingIntent.getBroadcast(
+            c, 34193,
+            Intent(c, PlaybackAlarmReceiver::class.java).apply { action = ACTION_TEST },
+            PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT
+        )
+        alarm.cancel(intent)
+        return arm(c, System.currentTimeMillis() + 90_000L, intent)
+    }
+
     /** Refresh the one upcoming exact alarm, then repeat only after it fires. */
     fun sync(c: Context): Boolean {
         val alarm = c.getSystemService(AlarmManager::class.java)
         val intent = pending(c)
         alarm.cancel(intent)
-        if (!DhammaPreferences.enabled(c)) return true
-        if (DhammaPreferences.tracks(c).isEmpty()) return false
-        if (!canScheduleExactly(c)) return false
+        if (!DhammaPreferences.enabled(c)) {
+            DhammaPreferences.event(c, "Daily playback disabled")
+            return true
+        }
+        if (DhammaPreferences.tracks(c).isEmpty()) {
+            DhammaPreferences.event(c, "NOT ARMED: No audio files")
+            return false
+        }
         val trigger = nextStartMillis(DhammaPreferences.hour(c), DhammaPreferences.minute(c))
-        return try {
-            alarm.setExactAndAllowWhileIdle(AlarmManager.RTC_WAKEUP, trigger, intent)
-            true
-        } catch (_: SecurityException) { false }
+        return arm(c, trigger, intent)
     }
 }
 
 /** Exact alarms are an OS-allowed foreground-service launch exemption for scheduled media playback. */
 class PlaybackAlarmReceiver : BroadcastReceiver() {
     override fun onReceive(context: Context, intent: Intent?) {
-        if (!DhammaPreferences.enabled(context) || DhammaPreferences.tracks(context).isEmpty()) return
-        // Arm tomorrow's alarm immediately; otherwise a stopped service could break recurrence.
-        PlaybackScheduler.sync(context)
+        val isTest = intent?.action == PlaybackScheduler.ACTION_TEST
+        if ((!isTest && !DhammaPreferences.enabled(context)) ||
+            DhammaPreferences.tracks(context).isEmpty()) {
+            DhammaPreferences.event(context, "Alarm ignored: schedule off or no MP3")
+            return
+        }
+        DhammaPreferences.event(context, if (isTest) "TEST ALARM FIRED" else "DAILY ALARM FIRED")
+        if (!isTest) PlaybackScheduler.sync(context)
         val service = Intent(context, PlaybackService::class.java).apply {
             action = PlaybackScheduler.ACTION_PLAY
         }
-        try { context.startForegroundService(service) } catch (_: Exception) {
-            // OEM policy may still block playback; never silently record or request mic.
+        try {
+            context.startForegroundService(service)
+            DhammaPreferences.event(context, "Alarm fired; starting audio service")
+        } catch (e: Exception) {
+            DhammaPreferences.event(context, "FAILED to start audio: ${e.javaClass.simpleName}: ${e.message}")
         }
     }
 }
