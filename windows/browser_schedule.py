@@ -16,6 +16,40 @@ from pathlib import Path
 from urllib.parse import urlsplit
 
 TASK_NAME = "DhammaMorning Chrome Website"
+# Isolated Chrome data directory for explicit experimental audible-autoplay opt-in.
+# It never edits the user's standard Chrome profile or sound permissions.
+AUDIO_PROFILE = Path(os.environ.get("LOCALAPPDATA", str(Path.home()))) / "DhammaMorning" / "ChromeAudioProfile"
+
+
+def chrome_launch_args(address: str, experimental_audio: bool = False) -> list[str]:
+    result: list[str] = []
+    if experimental_audio:
+        result.extend([
+            f"--user-data-dir={AUDIO_PROFILE}",
+            "--autoplay-policy=no-user-gesture-required",
+        ])
+    return [*result, "--new-window", address]
+
+
+def chrome_settings_page(page: str, experimental_audio: bool = False) -> tuple[bool, str]:
+    permitted = {
+        "sound": "chrome://settings/content/sound",
+        "sites": "chrome://settings/content",
+        "engagement": "chrome://media-engagement",
+    }
+    address = permitted.get(page)
+    if address is None:
+        return False, "Unrecognized Chrome settings page."
+    chrome = find_chrome()
+    if not chrome:
+        return False, "Google Chrome was not found. Please install it first."
+    try:
+        subprocess.Popen([str(chrome), *chrome_launch_args(address, experimental_audio)],
+            creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
+    except OSError as exc:
+        return False, f"Could not open Chrome settings: {exc}"
+    return True, "Opened Chrome " + page + " settings. Review and allow the site yourself."
+
 
 
 def normalize_url(raw: str) -> str:
@@ -74,13 +108,17 @@ def _ps_literal(value: str) -> str:
     return "'" + value.replace("'", "''") + "'"
 
 
-def registration_script(chrome: Path, url: str, hour: int, minute: int) -> str:
+def registration_script(chrome: Path, url: str, hour: int, minute: int,
+                        experimental_audio: bool = False) -> str:
     """Safe script for Windows ScheduledTasks. Runs only in the signed-in desktop."""
     value = normalize_url(url)
     if not 0 <= hour <= 23 or not 0 <= minute <= 59:
         raise ValueError("Choose a valid start time.")
     # Quoted URL is passed as a *Chrome argument*, not an executable command.
     arguments = '--new-window "' + value + '"'
+    if experimental_audio:
+        profile_arg = subprocess.list2cmdline([f"--user-data-dir={AUDIO_PROFILE}"])
+        arguments = profile_arg + " --autoplay-policy=no-user-gesture-required " + arguments
     return "\n".join([
         "$ErrorActionPreference = 'Stop'",
         "$action = New-ScheduledTaskAction -Execute " + _ps_literal(str(chrome))
@@ -119,13 +157,14 @@ def _powershell(script: str) -> tuple[bool, str]:
     return True, ""
 
 
-def install_chrome_task(url: str, hour: int, minute: int) -> tuple[bool, str]:
+def install_chrome_task(url: str, hour: int, minute: int,
+                        experimental_audio: bool = False) -> tuple[bool, str]:
     try:
         address = normalize_url(url)
         chrome = find_chrome()
         if chrome is None:
             return False, "Google Chrome was not found. Please install Chrome first."
-        script = registration_script(chrome, address, hour, minute)
+        script = registration_script(chrome, address, hour, minute, experimental_audio)
     except ValueError as exc:
         return False, str(exc)
     ok, detail = _powershell(script)
@@ -148,7 +187,7 @@ def remove_chrome_task() -> tuple[bool, str]:
     return (True, "Daily Chrome launch disabled.") if ok else (False, detail)
 
 
-def open_chrome_now(url: str) -> tuple[bool, str]:
+def open_chrome_now(url: str, experimental_audio: bool = False) -> tuple[bool, str]:
     try:
         address = normalize_url(url)
     except ValueError as exc:
@@ -157,7 +196,7 @@ def open_chrome_now(url: str) -> tuple[bool, str]:
     if not chrome:
         return False, "Google Chrome was not found. Please install Chrome first."
     try:
-        subprocess.Popen([str(chrome), "--new-window", address],
+        subprocess.Popen([str(chrome), *chrome_launch_args(address, experimental_audio)],
                          creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
     except OSError as exc:
         return False, f"Could not open Chrome: {exc}"
