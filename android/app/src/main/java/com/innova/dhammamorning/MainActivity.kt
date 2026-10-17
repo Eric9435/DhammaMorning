@@ -40,13 +40,18 @@ private val Sea = Color(0xFF296E6A)
 private val Cream = Color(0xFFF6F7F3)
 
 class MainActivity : ComponentActivity() {
+    private val resumeRevision = mutableIntStateOf(0)
+    override fun onResume() {
+        super.onResume()
+        resumeRevision.intValue++
+    }
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         setContent {
             MaterialTheme(colorScheme = lightColorScheme(
                 primary = Sea, onPrimary = Color.White, background = Cream,
                 surface = Color.White, onSurface = Night
-            )) { DhammaHome() }
+            )) { DhammaHome(resumeRevision.intValue) }
         }
     }
 }
@@ -61,8 +66,29 @@ private fun fileTitle(c: Context, uri: Uri): String {
 private fun clock(hour: Int, minute: Int) = "%02d:%02d".format(hour, minute)
 
 @Composable
-private fun DhammaHome() {
+private fun DhammaHome(resumeRevision: Int) {
     val context = androidx.compose.ui.platform.LocalContext.current
+    val setupPreferences = remember {
+        context.getSharedPreferences("dhamma_permission_setup", Context.MODE_PRIVATE)
+    }
+    var showPermissionSetup by remember {
+        mutableStateOf(
+            !setupPreferences.getBoolean("setupViewed", false) &&
+                (!DhammaPermissions.exactAlarm(context) ||
+                 !DhammaPermissions.notifications(context) ||
+                 !DhammaPermissions.batteryExempt(context))
+        )
+    }
+    if (showPermissionSetup) {
+        PermissionSetupDialog(
+            context = context,
+            resumeRevision = resumeRevision,
+            onDismiss = {
+                setupPreferences.edit().putBoolean("setupViewed", true).apply()
+                showPermissionSetup = false
+            }
+        )
+    }
     var tracks by remember { mutableStateOf(DhammaPreferences.tracks(context)) }
     var hour by remember { mutableIntStateOf(DhammaPreferences.hour(context)) }
     var minute by remember { mutableIntStateOf(DhammaPreferences.minute(context)) }
@@ -119,14 +145,8 @@ private fun DhammaHome() {
         DhammaPreferences.save(context, value, hour, minute, duration,
             stopMode, stopHour, stopMinute)
         if (value && !PlaybackScheduler.canScheduleExactly(context)) {
-            status = "Android needs Alarms & reminders permission for an exact daily start."
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
-                runCatching {
-                    context.startActivity(Intent(Settings.ACTION_REQUEST_SCHEDULE_EXACT_ALARM).apply {
-                        data = Uri.parse("package:${context.packageName}")
-                    })
-                }
-            }
+            status = "Exact-alarm permission is required. Tap Allow in the permission setup."
+            showPermissionSetup = true
         } else {
             val armed = PlaybackScheduler.sync(context)
             status = when {
@@ -163,6 +183,31 @@ private fun DhammaHome() {
             contentPadding = PaddingValues(16.dp),
             verticalArrangement = Arrangement.spacedBy(12.dp)
         ) {
+            item {
+                ElevatedCard(shape = RoundedCornerShape(16.dp)) {
+                    Column(Modifier.fillMaxWidth().padding(16.dp),
+                        verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                        Text("Automatic playback permissions", fontWeight = FontWeight.Bold)
+                        Text(
+                            "Exact alarms: " + if (DhammaPermissions.exactAlarm(context)) "Allowed" else "Needs Allow",
+                            style = MaterialTheme.typography.bodySmall
+                        )
+                        Text(
+                            "Notifications: " + if (DhammaPermissions.notifications(context)) "Allowed" else "Needs Allow",
+                            style = MaterialTheme.typography.bodySmall
+                        )
+                        Text(
+                            "Battery background access: " + if (DhammaPermissions.batteryExempt(context)) "Allowed" else "Needs Allow",
+                            style = MaterialTheme.typography.bodySmall
+                        )
+                        Text("Android may require extra Auto-start access for your phone brand.",
+                            style = MaterialTheme.typography.bodySmall, color = Color.Gray)
+                        Button(onClick = { showPermissionSetup = true }) {
+                            Text("Review / Allow permissions")
+                        }
+                    }
+                }
+            }
             item {
                 ElevatedCard(shape = RoundedCornerShape(16.dp)) {
                     Column(Modifier.fillMaxWidth().padding(16.dp)) {
