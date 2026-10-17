@@ -8,7 +8,7 @@ import time
 from datetime import datetime
 from playback_logic import next_occurrence, should_stop_at_playlist_end, duration_clock
 from browser_schedule import (install_chrome_task, remove_chrome_task, open_chrome_now,
-                              next_website_time, normalize_url)
+                              next_website_time, normalize_url, chrome_settings_page)
 from pathlib import Path
 
 from PySide6.QtCore import QUrl, Qt, QTimer
@@ -18,7 +18,7 @@ from PySide6.QtWidgets import (
     QApplication, QComboBox, QFileDialog, QFormLayout, QFrame, QHBoxLayout,
     QLabel, QListWidget, QMainWindow, QMenu, QMessageBox, QPushButton,
     QSlider, QSystemTrayIcon, QTimeEdit, QVBoxLayout, QWidget, QCheckBox, QSpinBox, QScrollArea,
-    QStyle, QLineEdit,
+    QStyle, QLineEdit, QDialog,
 )
 
 APP_NAME = "Dhamma Morning"
@@ -40,6 +40,7 @@ def default_settings() -> dict:
         "stop_mode": "end_of_playlist", "stop_hour": 7, "stop_minute": 0,
         "enabled": False, "volume": 70, "autostart": False,
         "website_enabled": False, "website_url": "", "website_hour": 6, "website_minute": 0,
+        "chrome_audio_mode": False, "chrome_setup_seen": False,
     }
 
 
@@ -194,6 +195,9 @@ class DhammaWindow(QMainWindow):
         self.website_open_button.clicked.connect(self._website_open_now)
         website_buttons.addWidget(self.website_open_button)
         browser.addLayout(website_buttons)
+        self.chrome_setup_button = QPushButton("Chrome Sound / Auto-Play Setup")
+        self.chrome_setup_button.clicked.connect(self._chrome_setup)
+        browser.addWidget(self.chrome_setup_button)
         self.website_status = QLabel("Set a URL and enable daily automatic Chrome opening.")
         self.website_status.setObjectName("hint")
         self.website_status.setWordWrap(True)
@@ -201,8 +205,8 @@ class DhammaWindow(QMainWindow):
         self.website_note = QLabel(
             "The app sets up Windows scheduling for you. Chrome can open while "
             "Dhamma Morning is closed, provided your Windows user is signed in and "
-            "the PC is awake/wakeable. Website sound autoplay depends on Chrome "
-            "and the website and cannot be guaranteed."
+            "the PC is awake/wakeable. Use Chrome Sound / Auto-Play Setup to "
+            "review audio permission. Website autoplay is not guaranteed."
         )
         self.website_note.setObjectName("hint")
         self.website_note.setWordWrap(True)
@@ -416,8 +420,11 @@ class DhammaWindow(QMainWindow):
                 int(self.config.get("website_hour", 6)),
                 int(self.config.get("website_minute", 0))
             )
+            experimental = bool(self.config.get("chrome_audio_mode", False))
+            audio_label = " · Experimental audio attempt enabled" if experimental else ""
             self.website_status.setText(
                 f"Windows task registered · Next Chrome launch: {target:%a, %d %b, %I:%M %p}"
+                + audio_label
             )
         else:
             self.website_status.setText("Automatic website opening is disabled.")
@@ -439,7 +446,9 @@ class DhammaWindow(QMainWindow):
         minute = self.website_time_field.time().minute()
         url = self.website_url_field.text().strip()
         if enabled:
-            ok, message = install_chrome_task(url, hour, minute)
+            ok, message = install_chrome_task(
+                url, hour, minute, bool(self.config.get("chrome_audio_mode", False))
+            )
         else:
             ok, message = remove_chrome_task()
         if not ok:
@@ -465,12 +474,139 @@ class DhammaWindow(QMainWindow):
         save_settings(self.config)
         self._refresh_website_status()
         self.status.setText(message)
+        if enabled and not self.config.get("chrome_setup_seen", False):
+            QTimer.singleShot(0, self._chrome_setup)
 
     def _website_open_now(self) -> None:
-        ok, message = open_chrome_now(self.website_url_field.text())
+        ok, message = open_chrome_now(
+            self.website_url_field.text(),
+            bool(self.config.get("chrome_audio_mode", False))
+        )
         self.website_status.setText(message)
         if not ok:
             QMessageBox.warning(self, "Chrome could not open", message)
+
+
+    def _chrome_setup(self) -> None:
+        """Guided site-audio setup; never silently changes the user's Chrome settings."""
+        dialog = QDialog(self)
+        dialog.setWindowTitle("Chrome Sound & Automatic Website Audio")
+        dialog.setMinimumWidth(570)
+        dialog.setModal(True)
+        outer = QVBoxLayout(dialog)
+        outer.setSpacing(13)
+
+        title = QLabel("Prepare Chrome for morning Dhamma audio")
+        title.setStyleSheet("font-size:19px; font-weight:700; color:#173047")
+        outer.addWidget(title)
+
+        intro = QLabel(
+            "Dhamma Morning can open Chrome settings, but only you can grant site permissions. "
+            "Chrome Sound permission is separate from audible autoplay. Follow these steps:"
+        )
+        intro.setWordWrap(True)
+        outer.addWidget(intro)
+
+        step_one = QLabel(
+            "1. Open Chrome Sound Settings. Make sure websites can play sound. "
+            "If your Dhamma website is muted, allow sound for that site."
+        )
+        step_one.setWordWrap(True)
+        outer.addWidget(step_one)
+        sound_button = QPushButton("Open Chrome Sound Settings")
+        outer.addWidget(sound_button)
+
+        step_two = QLabel(
+            "2. Open your Dhamma website in Chrome. Use the icon next to the address "
+            "to review Site Settings > Sound. Click Play on the page and listen at "
+            "least once. Website behaviour varies."
+        )
+        step_two.setWordWrap(True)
+        outer.addWidget(step_two)
+        website_button = QPushButton("Open Website & Test Sound")
+        outer.addWidget(website_button)
+
+        guide = QLabel(
+            "3. Optional: attempt unattended audio autoplay. This launches the "
+            "scheduled website in a separate Chrome profile with an experimental "
+            "autoplay option. It does not modify your regular Chrome profile or "
+            "silently grant permissions. The website must still support automatic "
+            "playback. Some Chrome versions may ignore this option."
+        )
+        guide.setWordWrap(True)
+        outer.addWidget(guide)
+
+        experimental = QCheckBox(
+            "Try automatic audio playback (experimental, separate Chrome profile)"
+        )
+        experimental.setChecked(bool(self.config.get("chrome_audio_mode", False)))
+        experimental.setToolTip(
+            "The separate Chrome profile may allow site audio without a click. "
+            "Only use that profile for trusted Dhamma websites."
+        )
+        outer.addWidget(experimental)
+
+        warning = QLabel(
+            "CAUTION: Audio from any page opened in the separate profile may "
+            "play without a click. Use only trusted sites. Existing Chrome "
+            "bookmarks and logins are not automatically shared with that profile."
+        )
+        warning.setStyleSheet("color:#8A5B31")
+        warning.setWordWrap(True)
+        outer.addWidget(warning)
+
+        response = QLabel("Permissions are not changed automatically.")
+        response.setWordWrap(True)
+        outer.addWidget(response)
+
+        def do_sound() -> None:
+            ok, message = chrome_settings_page("sound", experimental.isChecked())
+            response.setText(message)
+            if not ok:
+                QMessageBox.warning(dialog, "Chrome settings", message)
+
+        def do_website() -> None:
+            ok, message = open_chrome_now(self.website_url_field.text(),
+                                          experimental.isChecked())
+            response.setText(message)
+            if not ok:
+                QMessageBox.warning(dialog, "Chrome website", message)
+
+        sound_button.clicked.connect(do_sound)
+        website_button.clicked.connect(do_website)
+
+        controls = QHBoxLayout()
+        close_button = QPushButton("Later")
+        close_button.clicked.connect(dialog.reject)
+        controls.addWidget(close_button)
+        controls.addStretch()
+        save_button = QPushButton("Save Chrome Audio Setup")
+        save_button.setObjectName("accent")
+        controls.addWidget(save_button)
+        outer.addLayout(controls)
+
+        def save_setup() -> None:
+            requested = experimental.isChecked()
+            enabled = bool(self.config.get("website_enabled", False))
+            if enabled and requested != bool(self.config.get("chrome_audio_mode", False)):
+                ok, message = install_chrome_task(
+                    str(self.config.get("website_url", "")),
+                    int(self.config.get("website_hour", 6)),
+                    int(self.config.get("website_minute", 0)),
+                    requested
+                )
+                if not ok:
+                    response.setText(message)
+                    QMessageBox.warning(dialog, "Schedule update failed", message)
+                    return
+            self.config["chrome_audio_mode"] = requested
+            self.config["chrome_setup_seen"] = True
+            save_settings(self.config)
+            self._refresh_website_status()
+            dialog.accept()
+
+        save_button.clicked.connect(save_setup)
+        dialog.exec()
 
     def _refresh_list(self) -> None:
         selection = self.playlist.currentRow()
