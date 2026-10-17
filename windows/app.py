@@ -7,6 +7,8 @@ import sys
 import time
 from datetime import datetime
 from playback_logic import next_occurrence, should_stop_at_playlist_end, duration_clock
+from browser_schedule import (install_chrome_task, remove_chrome_task, open_chrome_now,
+                              next_website_time, normalize_url)
 from pathlib import Path
 
 from PySide6.QtCore import QUrl, Qt, QTimer
@@ -16,7 +18,7 @@ from PySide6.QtWidgets import (
     QApplication, QComboBox, QFileDialog, QFormLayout, QFrame, QHBoxLayout,
     QLabel, QListWidget, QMainWindow, QMenu, QMessageBox, QPushButton,
     QSlider, QSystemTrayIcon, QTimeEdit, QVBoxLayout, QWidget, QCheckBox, QSpinBox, QScrollArea,
-    QStyle,
+    QStyle, QLineEdit,
 )
 
 APP_NAME = "Dhamma Morning"
@@ -37,6 +39,7 @@ def default_settings() -> dict:
         "paths": [], "hour": 6, "minute": 0, "duration_minutes": 60,
         "stop_mode": "end_of_playlist", "stop_hour": 7, "stop_minute": 0,
         "enabled": False, "volume": 70, "autostart": False,
+        "website_enabled": False, "website_url": "", "website_hour": 6, "website_minute": 0,
     }
 
 
@@ -121,7 +124,7 @@ class DhammaWindow(QMainWindow):
         title = QLabel("Wake up to Dhamma")
         title.setObjectName("title")
         outer.addWidget(title)
-        subtitle = QLabel("Your Dhamma talks and chanting, played automatically until your chosen stopping point.")
+        subtitle = QLabel("Schedule local MP3 playback or automatically open a website in Google Chrome.")
         subtitle.setObjectName("sub")
         outer.addWidget(subtitle)
 
@@ -161,6 +164,50 @@ class DhammaWindow(QMainWindow):
         self.next_label.setObjectName("hint")
         schedule.addWidget(self.next_label)
         outer.addWidget(schedule.parentWidget())
+
+
+        # Website scheduling is independent of the MP3 timer above.
+        browser = self._card("Daily website in Google Chrome")
+        browser_form = QFormLayout()
+        browser_form.setSpacing(11)
+        self.website_url_field = QLineEdit()
+        self.website_url_field.setPlaceholderText("https://example.com/dhamma")
+        self.website_url_field.setClearButtonEnabled(True)
+        self.website_url_field.editingFinished.connect(self._website_form_changed)
+        browser_form.addRow("Website URL", self.website_url_field)
+        self.website_time_field = QTimeEdit()
+        self.website_time_field.setDisplayFormat("hh:mm AP")
+        self.website_time_field.timeChanged.connect(self._website_form_changed)
+        browser_form.addRow("Open every day", self.website_time_field)
+        browser.addLayout(browser_form)
+        self.website_enabled_field = QCheckBox(
+            "Automatically open this URL in Chrome at the selected time"
+        )
+        self.website_enabled_field.toggled.connect(self._website_toggle)
+        browser.addWidget(self.website_enabled_field)
+        website_buttons = QHBoxLayout()
+        self.website_save_button = QPushButton("Save website schedule")
+        self.website_save_button.setObjectName("accent")
+        self.website_save_button.clicked.connect(self._website_apply)
+        website_buttons.addWidget(self.website_save_button)
+        self.website_open_button = QPushButton("Open in Chrome now")
+        self.website_open_button.clicked.connect(self._website_open_now)
+        website_buttons.addWidget(self.website_open_button)
+        browser.addLayout(website_buttons)
+        self.website_status = QLabel("Set a URL and enable daily automatic Chrome opening.")
+        self.website_status.setObjectName("hint")
+        self.website_status.setWordWrap(True)
+        browser.addWidget(self.website_status)
+        self.website_note = QLabel(
+            "The app sets up Windows scheduling for you. Chrome can open while "
+            "Dhamma Morning is closed, provided your Windows user is signed in and "
+            "the PC is awake/wakeable. Website sound autoplay depends on Chrome "
+            "and the website and cannot be guaranteed."
+        )
+        self.website_note.setObjectName("hint")
+        self.website_note.setWordWrap(True)
+        browser.addWidget(self.website_note)
+        outer.addWidget(browser.parentWidget())
 
         lib = self._card("Your Dhamma audio")
         row = QHBoxLayout()
@@ -281,6 +328,9 @@ class DhammaWindow(QMainWindow):
         self.enabled_field.blockSignals(True)
         self.volume_slider.blockSignals(True)
         self.autostart_box.blockSignals(True)
+        self.website_url_field.blockSignals(True)
+        self.website_time_field.blockSignals(True)
+        self.website_enabled_field.blockSignals(True)
         self.time_field.setTime(QTime(int(self.config["hour"]), int(self.config["minute"])))
         minutes = int(self.config["duration_minutes"])
         self.duration_field.setValue(min(max(minutes, 1), 1440))
@@ -293,6 +343,13 @@ class DhammaWindow(QMainWindow):
         self.volume_value.setText(f'{int(self.config["volume"])}%')
         self.audio.setVolume(int(self.config["volume"]) / 100)
         self.autostart_box.setChecked(bool(self.config.get("autostart", False)))
+        self.website_url_field.setText(str(self.config.get("website_url", "")))
+        self.website_time_field.setTime(QTime(
+            int(self.config.get("website_hour", 6)),
+            int(self.config.get("website_minute", 0))
+        ))
+        self.website_enabled_field.setChecked(bool(self.config.get("website_enabled", False)))
+        self._refresh_website_status()
         self.playlist.addItems([Path(p).name for p in self.paths])
         self.time_field.blockSignals(False)
         self.duration_field.blockSignals(False)
@@ -302,6 +359,9 @@ class DhammaWindow(QMainWindow):
         self._stop_mode_changed()
         self.volume_slider.blockSignals(False)
         self.autostart_box.blockSignals(False)
+        self.website_url_field.blockSignals(False)
+        self.website_time_field.blockSignals(False)
+        self.website_enabled_field.blockSignals(False)
 
     def _stop_mode_changed(self, *_unused) -> None:
         mode = self.stop_mode_field.currentData() or "end_of_playlist"
@@ -348,6 +408,69 @@ class DhammaWindow(QMainWindow):
             self.enabled_field.setChecked(False)
             self.enabled_field.blockSignals(False)
         self._save_form()
+
+
+    def _refresh_website_status(self) -> None:
+        if self.config.get("website_enabled", False):
+            target = next_website_time(
+                int(self.config.get("website_hour", 6)),
+                int(self.config.get("website_minute", 0))
+            )
+            self.website_status.setText(
+                f"Windows task registered · Next Chrome launch: {target:%a, %d %b, %I:%M %p}"
+            )
+        else:
+            self.website_status.setText("Automatic website opening is disabled.")
+
+    def _website_form_changed(self, *_unused) -> None:
+        if self.website_enabled_field.isChecked():
+            self.website_status.setText(
+                "Unsaved changes · Click Save website schedule to update the Windows task."
+            )
+        else:
+            self.website_status.setText("Click Save website schedule to register this URL.")
+
+    def _website_toggle(self, *_unused) -> None:
+        self._website_apply()
+
+    def _website_apply(self, *_unused) -> None:
+        enabled = self.website_enabled_field.isChecked()
+        hour = self.website_time_field.time().hour()
+        minute = self.website_time_field.time().minute()
+        url = self.website_url_field.text().strip()
+        if enabled:
+            ok, message = install_chrome_task(url, hour, minute)
+        else:
+            ok, message = remove_chrome_task()
+        if not ok:
+            self.website_status.setText(message)
+            QMessageBox.warning(self, "Chrome schedule could not be saved", message)
+            previous = bool(self.config.get("website_enabled", False))
+            self.website_enabled_field.blockSignals(True)
+            self.website_enabled_field.setChecked(previous)
+            self.website_enabled_field.blockSignals(False)
+            return
+        if enabled:
+            # Save normalized address, without changing the target scheduled task.
+            url = normalize_url(url)
+            self.website_url_field.blockSignals(True)
+            self.website_url_field.setText(url)
+            self.website_url_field.blockSignals(False)
+        self.config.update({
+            "website_url": url,
+            "website_hour": hour,
+            "website_minute": minute,
+            "website_enabled": enabled,
+        })
+        save_settings(self.config)
+        self._refresh_website_status()
+        self.status.setText(message)
+
+    def _website_open_now(self) -> None:
+        ok, message = open_chrome_now(self.website_url_field.text())
+        self.website_status.setText(message)
+        if not ok:
+            QMessageBox.warning(self, "Chrome could not open", message)
 
     def _refresh_list(self) -> None:
         selection = self.playlist.currentRow()
