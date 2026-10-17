@@ -41,13 +41,14 @@ jobs:
           print('Verified and imported', len(members), 'files')
           PY
           rm -rf transfer
-          rm -f .github/workflows/bootstrap.yml
+          # Existing bootstrap workflow stays unchanged in the pushed commit.
+          # GitHub Actions token cannot change workflow definitions.
       - name: Commit source into dedicated repository
         shell: bash
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add -A
+          git add -A -- . ':(exclude).github/workflows/**'
           git diff --cached --quiet && exit 0
           git commit -m "Import verified Dhamma Morning v0.2.0 Android and Windows source"
           git push origin HEAD:main
