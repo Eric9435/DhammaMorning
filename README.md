@@ -26,7 +26,20 @@ To build in Android Studio, open `android/`, install Android SDK platform 35, JD
 
 ## Windows
 
-Desktop PySide6 / QtMultimedia GUI with local file picker, playlist ordering, time scheduling, **three stop modes**, adjustable volume, and system-tray controls. The PC must remain powered on, awake and signed into Windows, with the application running (possibly minimized to tray). Optionally enable startup-at-Windows-login.
+Desktop PySide6 / QtMultimedia GUI with local file picker, playlist ordering, time scheduling, **three stop modes**, adjustable volume, and system-tray controls. The local MP3 scheduler requires Dhamma Morning to remain running (possibly minimized to the system tray). You can optionally enable launch at Windows sign-in.
+
+### Automatically open a Chrome website every day
+
+Configure **Daily website in Google Chrome** entirely within the Dhamma Morning Windows app:
+
+1. Enter your website address (HTTPS is used automatically when omitted).
+2. Choose a daily clock time.
+3. Check **Automatically open this URL in Chrome at the selected time**.
+4. Click **Save website schedule**. Use **Open in Chrome now** to test the URL immediately.
+
+The app registers or removes its own ordinary **Windows Task Scheduler** task on your behalf. You do not need to open Task Scheduler. The task launches **Chrome directly**, even when the Dhamma Morning app is closed. However, Windows must remain **powered on and your user signed in**. For sleep, the task requests wake permission but PC hardware and wake timer settings control whether wake succeeds. When the scheduled time is missed, Windows may open Chrome after the user becomes available.
+
+Chrome's site-specific autoplay policies may block audio/video playback even though the browser and website opened. The feature **does not automatically bypass Chrome sound/autoplay restrictions**. The website schedule and local MP3 playback schedule are independent; neither automatically stops or closes the other.
 
 ```powershell
 py -3.11 -m venv .venv
@@ -37,29 +50,16 @@ python windows\app.py
 
 Run `windows/build.ps1` or `.github/workflows/windows.yml` to produce a portable `DhammaMorning.exe` on Windows. Python unit tests are located at `windows/test_playback_logic.py`.
 
-## Create the **new, dedicated** GitHub repository
+## GitHub repository
 
-This ChatGPT GitHub connection permits writing to **existing** repositories, but does **not** expose a `create repository` action. Consequently **no GitHub repository has been created or updated** for this package. To publish it as its own project:
-
-1. Sign into GitHub and create a **new empty** repository named `DhammaMorning` (Public or Private is your choice). **Do not** initialize it with a README, `.gitignore`, or license.
-2. Extract this ZIP. Open a terminal in the extracted `DhammaMorning` folder and run:
-
-```bash
-git init -b main
-git add .
-git commit -m "Initial Dhamma Morning Android and Windows audio player"
-git remote add origin https://github.com/YOUR-USERNAME/DhammaMorning.git
-git push -u origin main
-```
-
-Replace `YOUR-USERNAME` with your GitHub login. With an empty repo created and connected, ChatGPT can also upload the prepared files through the connected GitHub integration. Both platform build workflows run on push and produce artifacts if compilation succeeds.
+The dedicated, standalone GitHub repository is [Eric9435/DhammaMorning](https://github.com/Eric9435/DhammaMorning). GitHub Actions builds separate Android APK and Windows EXE artifacts. This project is completely separate from EricPDF.
 
 ## Notes and boundaries
 
 - User supplies their own local MP3/audio files; sample religious audio is not bundled.
-- Windows playback does not start if the PC is sleeping or off. Android scheduled playback can be affected by alarm permission, battery restrictions, reboot behavior and vendor firmware.
+- Windows local MP3 playback requires the Dhamma Morning process running; website opening uses a separately registered Windows task. Neither scheduled action runs on a PC that is shut down. Android scheduled playback can be affected by alarm permission, battery restrictions, reboot behavior and vendor firmware.
 - Scheduled daily start time and stop-clock are based on the **device's local time zone**.
-- Source tests passed for basic stop-mode logic; full app builds, device playback, and overnight reliability **are not yet certified**. No installable APK/EXE is claimed to exist in this ZIP.
+- GitHub Actions builds APK and EXE artifacts. Automated tests validate timing and input safety, but overnight playback and Chrome autoplay must still be tested on a real device/PC.
 - Each platform stores its own local settings; there is **no cross-device synchronization**.
 
 Developed by **innovateX** · Dhamma Morning.
