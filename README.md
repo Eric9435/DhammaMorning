@@ -39,7 +39,16 @@ Configure **Daily website in Google Chrome** entirely within the Dhamma Morning 
 
 The app registers or removes its own ordinary **Windows Task Scheduler** task on your behalf. You do not need to open Task Scheduler. The task launches **Chrome directly**, even when the Dhamma Morning app is closed. However, Windows must remain **powered on and your user signed in**. For sleep, the task requests wake permission but PC hardware and wake timer settings control whether wake succeeds. When the scheduled time is missed, Windows may open Chrome after the user becomes available.
 
-Chrome's site-specific autoplay policies may block audio/video playback even though the browser and website opened. The feature **does not automatically bypass Chrome sound/autoplay restrictions**. The website schedule and local MP3 playback schedule are independent; neither automatically stops or closes the other.
+### Chrome Sound & Auto-Play Setup dialog
+
+On first enabling a website schedule (or launching a previously scheduled app for the first time after this update), Dhamma Morning displays a guided Chrome audio setup dialog. You can reopen it with **Chrome Sound / Auto-Play Setup**:
+
+1. **Open Chrome Sound Settings**: Navigate to `chrome://settings/content/sound` in the relevant Chrome profile, then review and allow website sound yourself.
+2. **Open Chrome Site Permissions** and review sound permission for the Dhamma domain.
+3. **Open Website & Test Sound**: Start playback manually on the website at least once.
+4. Optionally tick **Try automatic audio playback (experimental, separate Chrome profile)**, then **Save Chrome Audio Setup**. The Windows scheduled task is updated with an *isolated* Chrome profile and the experimental Chromium startup option `--autoplay-policy=no-user-gesture-required`. This option is an opt-in attempt, not an operating-system or Chrome permission grant. Some Chrome versions and websites may ignore it. Only browse trusted sites using the separate profile; it can allow sound to autoplay without a click. The normal Chrome profile, bookmarks, permissions and login sessions are not modified or shared.
+
+**Limitations:** The app cannot silently click Allow in Chrome or force an arbitrary webpage to implement audio autoplay. The **Sound Allow** setting does not itself guarantee **autoplay with sound**. Chrome may block playback depending on the site's code, whether the visitor has previously interacted with the domain, and browser policies. The website schedule and local MP3 playback schedule are independent; neither automatically stops or closes the other.
 
 ```powershell
 py -3.11 -m venv .venv
